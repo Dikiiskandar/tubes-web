@@ -1,6 +1,9 @@
-import { Head, useForm } from '@inertiajs/react';
+import { Head } from '@inertiajs/react';
 import { LoaderCircle } from 'lucide-react';
-import { FormEventHandler } from 'react';
+import { FormEventHandler, useState } from 'react';
+
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '@/firebase';
 
 import InputError from '@/components/input-error';
 import TextLink from '@/components/text-link';
@@ -9,6 +12,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AuthLayout from '@/layouts/auth-layout';
+
+import { router } from '@inertiajs/react';
 
 type LoginForm = {
     email: string;
@@ -22,17 +27,42 @@ interface LoginProps {
 }
 
 export default function Login({ status, canResetPassword }: LoginProps) {
-    const { data, setData, post, processing, errors, reset } = useForm<Required<LoginForm>>({
+    const [form, setForm] = useState<LoginForm>({
         email: '',
         password: '',
         remember: false,
     });
 
-    const submit: FormEventHandler = (e) => {
+    const [errors, setErrors] = useState<Record<string, string>>({});
+    const [processing, setProcessing] = useState(false);
+
+    const handleChange = (field: keyof LoginForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
+        setForm({ ...form, [field]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+    };
+
+    const submit: FormEventHandler = async (e) => {
         e.preventDefault();
-        post(route('login'), {
-            onFinish: () => reset('password'),
-        });
+        setProcessing(true);
+        setErrors({});
+
+        try {
+            const userCredential = await signInWithEmailAndPassword(auth, form.email, form.password);
+            const idToken = await userCredential.user.getIdToken();
+
+            // Send to Laravel backend to verify and stores
+            await router.post('/firebase-register', { idToken });
+        } catch (error: any) {
+            const code = error.code;
+            const errorMessages: Record<string, string> = {
+                'auth/user-not-found': 'User not found',
+                'auth/wrong-password': 'Incorrect password',
+                'auth/invalid-email': 'Invalid email address',
+                // add other error codes you want to handle
+            };
+            setErrors({ email: errorMessages[code] || 'Login failed' });
+        } finally {
+            setProcessing(false);
+        }
     };
 
     return (
@@ -48,11 +78,10 @@ export default function Login({ status, canResetPassword }: LoginProps) {
                             type="email"
                             required
                             autoFocus
-                            tabIndex={1}
-                            autoComplete="email"
-                            value={data.email}
-                            onChange={(e) => setData('email', e.target.value)}
+                            value={form.email}
+                            onChange={handleChange('email')}
                             placeholder="email@example.com"
+                            disabled={processing}
                         />
                         <InputError message={errors.email} />
                     </div>
@@ -61,7 +90,7 @@ export default function Login({ status, canResetPassword }: LoginProps) {
                         <div className="flex items-center">
                             <Label htmlFor="password">Password</Label>
                             {canResetPassword && (
-                                <TextLink href={route('password.request')} className="ml-auto text-sm" tabIndex={5}>
+                                <TextLink href={route('password.request')} className="ml-auto text-sm">
                                     Forgot password?
                                 </TextLink>
                             )}
@@ -70,27 +99,15 @@ export default function Login({ status, canResetPassword }: LoginProps) {
                             id="password"
                             type="password"
                             required
-                            tabIndex={2}
-                            autoComplete="current-password"
-                            value={data.password}
-                            onChange={(e) => setData('password', e.target.value)}
+                            value={form.password}
+                            onChange={handleChange('password')}
                             placeholder="Password"
+                            disabled={processing}
                         />
                         <InputError message={errors.password} />
                     </div>
 
-                    <div className="flex items-center space-x-3">
-                        <Checkbox
-                            id="remember"
-                            name="remember"
-                            checked={data.remember}
-                            onClick={() => setData('remember', !data.remember)}
-                            tabIndex={3}
-                        />
-                        <Label htmlFor="remember">Remember me</Label>
-                    </div>
-
-                    <Button type="submit" className="mt-4 w-full" tabIndex={4} disabled={processing}>
+                    <Button type="submit" className="mt-4 w-full" disabled={processing}>
                         {processing && <LoaderCircle className="h-4 w-4 animate-spin" />}
                         Log in
                     </Button>
@@ -98,7 +115,7 @@ export default function Login({ status, canResetPassword }: LoginProps) {
 
                 <div className="text-muted-foreground text-center text-sm">
                     Don't have an account?{' '}
-                    <TextLink href={route('register')} tabIndex={5}>
+                    <TextLink href={route('register')}>
                         Sign up
                     </TextLink>
                 </div>
